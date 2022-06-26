@@ -7,11 +7,16 @@ jupyter:
       format_version: '1.2'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3 (ipykernel)
+    display_name: Python 3
     language: python
     name: python3
+---
+
+```{python}
+---
 output: github_document
 ---
+```
 
 # Counterfeit detection
 
@@ -23,7 +28,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats as st
-import scrapbook as sb
+#import scrapbook as sb
 ```
 
 ```{python}
@@ -34,7 +39,7 @@ plt.rcParams['figure.figsize']=(8,8)
 Please insert you  firstname  and name below
 
 ```{python}
-sb.glue("Who", ["FirstName", "Name"])
+#sb.glue("Who", ["Patryk", "Zur"])
 ```
 
 ```{python tags=c()}
@@ -64,6 +69,7 @@ data_train, data_test = train_test_split(data, test_size=0.2, shuffle=True, stra
 
 ```{python tags=c()}
 lbls_train = data_train['counterfeit']
+lbls_test = data_test['counterfeit']
 ```
 
 ```{python tags=c()}
@@ -101,15 +107,274 @@ __Hint__ For calculating metrics and plotting ROC curves you may use functions f
 
 ```{python}
 from sklearn.metrics import roc_auc_score, roc_curve, confusion_matrix
+from sklearn import preprocessing
+import scipy.stats as st
+from scipy.stats import norm
+
+data_train, data_test = train_test_split(data, test_size=0.2, shuffle=True, stratify=data.loc[:,'counterfeit'], random_state=seed)
+
+#I will choose upper left feature =a0
+
+#Let's implement GB classifier
+
+a0_true = data_train['a0'][lbls_train==0]
+a0_counterfeit = data_train['a0'][lbls_train==1]
+
+pair_true = norm.fit(a0_true)
+pair_counterfeit = norm.fit(a0_counterfeit)
+
+xs = np.linspace(-10, 10, 518)
+
+plt.plot(xs, norm(*pair_true).pdf(xs))
 ```
 
-## Problem 2
+```{python}
+pd_a0_cond_T = norm(*pair_true)
+pd_a0_cond_C = norm(*pair_counterfeit)
 
+pdf_a0_cond_T = pd_a0_cond_T.pdf
+pdf_a0_cond_C = pd_a0_cond_C.pdf
+
+#calculation probability
+
+number_of_samples = len(lbls_train)
+number_of_true = len(data_train[:][lbls_train == 0])
+
+p_T = number_of_true / number_of_samples
+p_C = 1 - p_T
+
+def pdf_C_cond(a0):
+    return pdf_a0_cond_C(a0)*p_C/(pdf_a0_cond_C(a0)*p_C+pdf_a0_cond_T(a0)*p_T)
+
+xs = np.linspace(-10, 10, 518)
+plt.plot(xs,pdf_C_cond(xs));
+plt.axhline(0.5, linewidth=1, c='green');
+
+def make_pdf_P_cond(labels, data):
+    """Takes labels (0,1) and a single feature and returns the conditional 
+    probability distribution function of the positive label given the feature assuming
+    normal distribution of the  feature values.
+    """
+    
+    positives = data[labels==1]
+    negatives = data[labels==0]
+    
+    #probability density functions
+    pdf_cond_P = st.norm(*st.norm.fit(positives)).pdf
+    pdf_cond_N = st.norm(*st.norm.fit(negatives)).pdf
+    
+    #priors
+    P_P = labels.mean()
+    P_N = 1-P_P
+    
+    #return classifier
+    def pdf(x):
+        return pdf_cond_P(x)*P_P/(pdf_cond_P(x)*P_P+pdf_cond_N(x)*P_N)
+        
+    return pdf
+
+pdf_C_cond_a0 = make_pdf_P_cond(lbls_train, data_train['a0'] )
+```
+
+```{python}
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+#for train set
+clasification_train = ( pdf_C_cond_a0(data_train['a0'])>=0.5 )
+confusion_matrix(lbls_train, clasification_train, normalize='true')
+
+fig_height = 10
+fig_width = 15
+
+def roc_plot(figsize=[fig_height,fig_height]):
+    """Returns figure and axes object for plotting ROC curve
+    setting aspect ration to one and labeling the axes.
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.set_aspect(1)
+    ax.set_xlabel('FPR');
+    ax.set_ylabel('TPR');
+    return fig,ax
+```
+
+```{python}
+#for train set
+
+#false positive rate
+fpr = np.sum(clasification_train> lbls_train)/len(data_train['a0'][lbls_train==0])
+
+#true positive rate
+fnr = np.sum(clasification_train < lbls_train)/len(data_train['a0'][lbls_train==1])
+tpr = 1 - fnr
+
+from sklearn.metrics import roc_curve, roc_auc_score
+
+fprs, tprs, thds = roc_curve(lbls_train, pdf_C_cond_a0(data_train['a0']));
+
+fig, ax = roc_plot()
+
+roc = ax.plot(fprs,tprs, color='yellow');
+
+ax.scatter([fpr],[tpr],s = 30, color='blue', zorder=5)
+
+ax.set_title("ROC curve", fontsize=14);
+ax.plot([0,1],[0,1],'-', c='grey', linewidth = 1 )
+ax.plot([0,0,1],[0,1,1],'--', c = roc[0].get_color() , linewidth=0.5)
+ax.scatter([0],[0],s = 30, c = roc[0].get_color() )
+ax.scatter([1],[1],s = 30)
+ax.grid()
+```
 
 Same as Problem 1 but now implement Gaussian Naive Bayes using two features. Compare ROC curves on the test set. What is teh improvement of AUC score on the test set?
 
+```{python}
+
+```
+
+```{python}
+#now the same but with 2 features
+
+auc = roc_auc_score(lbls_test, pdf_C_cond_a0(data_test['a0']))
+
+from sklearn.model_selection import  train_test_split
+data_train[['a0', 'a1']].corr()
+
+def make_pdf_P_cond_NB(labels, a0, a1 ):
+    
+    positives = labels==1
+    negatives = labels==0
+    
+    pdf_a0_P = st.norm(*st.norm.fit(a0[positives])).pdf
+    pdf_a0_N = st.norm(*st.norm.fit(a0[negatives])).pdf 
+    
+    pdf_a1_P = st.norm(*st.norm.fit(a1[positives])).pdf
+    pdf_a1_N = st.norm(*st.norm.fit(a1[negatives])).pdf                  
+                      
+    
+    P_P = labels.mean()
+    P_N = 1-P_P
+    
+    def pdf(a0x, a1x):
+        p_prod = pdf_a0_P(a0x)*pdf_a1_P(a1x)*P_P
+        n_prod = pdf_a0_N(a0x)*pdf_a1_N(a1x)*P_N
+        
+        
+        return p_prod/(p_prod +n_prod)
+        
+    return pdf
+
+def get_rates_from(conf_matrix):
+    tn, fp, fn, tp = conf_matrix
+    
+    tpr = tp / (fn + tp)
+    fpr = fp / (fp + tn)
+    
+    tnr = 1 - fpr
+    fnr = 1 - tpr
+    
+    return tpr, fpr, fnr, tnr
+    
+nb_prob = make_pdf_P_cond_NB(lbls_train, data_train.a0, data_train.a1)   
+
+clasification_test = ( nb_prob(data_test['a0'], data_test['a1'])>=0.5 )
+confusion_matrix(lbls_test, clasification_test, normalize='true')
+
+
+ConfusionMatrixDisplay.from_predictions(lbls_test, clasification_test, display_labels=('True', 'counterfeit'),  normalize='true');
+
+nb_tpr, nb_fpr, nb_fnr, nb_tnr = get_rates_from(confusion_matrix(lbls_test, clasification_test).ravel())
+
+nb_fprs, nb_tprs, thds = roc_curve(lbls_test, nb_prob(data_test['a0'], data_test['a1']));
+nb_auc = roc_auc_score(lbls_test, nb_prob(data_test['a0'], data_test['a1']))
+
+fig, ax = roc_plot()
+roc = ax.plot(fprs,tprs, label='a0');
+
+ax.plot(nb_fprs, nb_tprs,  label = "a0 & a1")
+ax.fill_between(nb_fprs, nb_tprs, alpha=0.15, color = "yellow");
+
+ax.set_title("ROC curve", fontsize=14);
+ax.plot([0,1],[0,1],'-', c='grey', linewidth = 1 )
+ax.plot([0,0,1],[0,1,1],'--', c = roc[0].get_color() , linewidth=0.5)
+
+ax.scatter([fpr],[tpr], color='blue', zorder = 5)
+
+ax.scatter([nb_fpr],[nb_tpr], color='orange', zorder = 5)
+ax.text(0.4,0.8,"AUC = {:.3f}\nAUC NB = {:.3f}".format(auc, nb_auc))
+ax.legend();
+```
+
+```{python}
+
+```
+
+```{python}
+
+```
 
 ## Problem 3
 
 
 Same as Problem 2 but now implement Gaussian Naive Bayes using all features.
+
+```{python}
+from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import ConfusionMatrixDisplay
+
+nb = GaussianNB()
+
+nb.fit(data_train.iloc[:, 0:4], lbls_train)
+
+print("Naive Bayes score: ",nb.score(data_test.iloc[:, 0:4], lbls_test))
+```
+
+```{python}
+ConfusionMatrixDisplay.from_predictions(lbls_train, nb.predict(data_train.iloc[:, 0:4]), display_labels=('True', 'counterfeit'),  normalize='true');
+```
+
+```{python}
+ConfusionMatrixDisplay.from_predictions(lbls_test, nb.predict(data_test.iloc[:, 0:4]), display_labels=('True', 'counterfeit'),  normalize='true');
+```
+
+```{python}
+
+def roc_plot(figsize=[fig_height,fig_height]):
+    """Returns figure and axes object for plotting ROC curve
+    setting aspect ration to one and labeling the axes.
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.set_aspect(1)
+    ax.set_xlabel('FPR');
+    ax.set_ylabel('TPR');
+    return fig,ax
+
+nb_fprs, nb_tprs, thds = roc_curve(lbls_test, nb.predict_proba(data_test.iloc[:, 0:4])[:, 1]);
+nb_auc = roc_auc_score(lbls_test, nb.predict_proba(data_test.iloc[:, 0:4])[:, 1])
+
+fig, ax = roc_plot()
+
+ax.plot(nb_fprs, nb_tprs,  label = "a0, a1, a2, a3")
+ax.fill_between(nb_fprs, nb_tprs, alpha=0.15, color = "yellow");
+
+ax.plot([0,1],[0,1],'-', c='blue' )
+ax.plot([0,0,1],[0,1,1],'--', c = roc[0].get_color() , linewidth=0.5)
+
+ax.text(0.4,0.8,"Naive Bayes = {:.3f}".format(nb_auc))
+ax.legend();
+```
+
+```{python}
+
+```
+
+```{python}
+
+```
+
+```{python}
+
+```
+
+```{python}
+
+```

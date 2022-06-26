@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.2'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3 (ipykernel)
+    display_name: Python 3
     language: python
     name: python3
 ---
@@ -23,6 +23,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats as st
 import scrapbook as sb
+import pandas as pd
+from sklearn.metrics import roc_curve, roc_auc_score, f1_score, precision_score, confusion_matrix
+from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
+from  sklearn.model_selection import train_test_split
+from sklearn.mixture import GaussianMixture
+
+#Patryk Zur
 ```
 
 <!-- #region tags=["skip"] -->
@@ -52,10 +59,52 @@ sb.glue('A_scores',['tnr', 'fpr', 'fnr', 'tpr', 'precision', 'f1', 'auc'], displ
 also please save the ROC plot
 
 ```{python}
+fig_height = 10
+fig_width = 15
+
+def roc_plot(figsize=[fig_height,fig_height]):
+    """Returns figure and axes object for plotting ROC curve
+    setting aspect ration to one and labeling the axes.
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.set_aspect(1)
+    ax.set_xlabel('FPR');
+    ax.set_ylabel('TPR');
+    return fig,ax
+
+#by fixing the seed we guarantee that we can split the set in same way each time
+#this maybe handy for debuging purposes
+seed = 77678 
+train_data, test_data  = train_test_split(data,test_size=0.3, random_state=seed)
+labelsForTest = test_data['counterfeit']
+labelsForTrain = train_data['counterfeit']
+
+qda  = QuadraticDiscriminantAnalysis(store_covariance=True)
+
+qda.fit(train_data.iloc[:, 0:3], labelsForTrain)
+probabilities = qda.predict_proba(test_data.iloc[:, 0:3])[:,1]
+predicted = probabilities>=0.5
+tnr, fpr, fnr, tpr = confusion_matrix(labelsForTest, predicted, normalize='true').ravel()
+f1 = f1_score(labelsForTest, predicted)
+precision = precision_score(labelsForTest, predicted)
+fprs,tprs,thds =  roc_curve(labelsForTest, probabilities)
+auc = roc_auc_score(labelsForTest, probabilities)
+df, qda_fprs, qda_tprs, qda_thds, qda_auc =pd.DataFrame({'tnr':[tnr],
+'fnr':[fnr],
+'fpr':[fpr],
+'tpr':[tpr],
+'precision' : [precision],
+'f1' :[f1],
+'auc' :[auc]
+}, index=['qda']), fprs, tprs, thds, auc
+
 fig, ax = plt.subplots()
 #plot ROC
-ax.plot([0,1],[0,1]);
+ax.plot(qda_fprs,qda_tprs, label='QuadraticDiscriminantAnalysis');
+ax.legend()
 sb.glue('A_ROC',fig, "display", display=False);
+print("AUC=")
+print(qda_auc)
 ```
 
 ### B.
@@ -70,9 +119,65 @@ sb.glue('B_scores',['tnr', 'fpr', 'fnr', 'tpr', 'precision', 'f1', 'auc'], displ
 also please save the ROC plot
 
 ```{python}
+def make_pdf(cmp):
+    """
+    Takes a GaussianMixture object and returns corresponding
+    probability distribution function
+    """
+    n_cmp = cmp.n_components
+    dists = [st.multivariate_normal(cmp.means_[i], cmp.covariances_[i]) for i in range(n_cmp)]
+    def pdf(x):
+        p = 0.0
+        for i in range(n_cmp):
+            p+= cmp.weights_[i]*dists[i].pdf(x)
+        return p
+    
+    return pdf
+    
+    
+def make_predict_proba(cmp0, cmp1, pi0=0.5, pi1=.5):
+    """
+    Takes two GaussianMixture object and corresponding priors and returns 
+    pdf for conditional probability P(c=1|x)
+    """
+    pdf0 = make_pdf(cmp0)
+    pdf1 = make_pdf(cmp1)
+    def p(x):
+        p0=pi0*pdf0(x)
+        p1=pi1*pdf1(x)
+        return p1/(p1+p0)    
+        
+    return p
+
+gaussForZeros = GaussianMixture(n_components=2) 
+gaussForOnes = GaussianMixture(n_components=2) 
+
+g0 = train_data.iloc[:, 0:3][labelsForTrain==0]
+g1 = train_data.iloc[:, 0:3][labelsForTrain==1]
+gaussForZeros.fit(g0)
+gaussForOnes.fit(g1)
+predict_proba = make_predict_proba(gaussForZeros, gaussForOnes, 0.5, 0.5)
+proba =  predict_proba(test_data.iloc[:,0:3])
+predicted = proba>=0.5
+tnr, fpr, fnr, tpr = confusion_matrix(labelsForTest, predicted, normalize='true').ravel()
+f1 = f1_score(labelsForTest, predicted)
+prec = precision_score(labelsForTest, predicted)
+fprs,tprs,thds =  roc_curve(labelsForTest, proba)
+auc = roc_auc_score(labelsForTest, proba)
+df, mga_fprs, mga_tprs, mga_thds, mga_auc=pd.DataFrame({'tnr':[tnr],
+                          'fnr':[fnr],
+                          'fpr':[fpr],
+                          'tpr':[tpr],
+                          'precision' : [prec],
+                          'f1' :[f1],
+                          'auc' :[auc]
+                           }, index=["mga"]), fprs, tprs, thds, auc
+
+
 fig, ax = plt.subplots()
 #plot ROCs (for A and B problems)
-ax.plot([0,1],[0,1]);
+ax.plot(mga_fprs,mga_tprs, label='mga');
+ax.plot(qda_fprs, qda_tprs,  label = "qda");
 sb.glue('B_ROC',fig, "display", display=False);
 ```
 
@@ -98,6 +203,9 @@ sb.glue('C_scores',['tnr', 'fpr', 'fnr', 'tpr', 'precision', 'f1', 'auc'], displ
 also please save the ROC plot
 
 ```{python}
+from sklearn.model_selection import StratifiedKFold
+
+
 fig, ax = plt.subplots()
 #plot ROCs (for A and B  Cproblems)
 ax.plot([0,1],[0,1]);

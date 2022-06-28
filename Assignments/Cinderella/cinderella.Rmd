@@ -54,7 +54,7 @@ gaussianMixture = GaussianMixture(n_components=2, n_init=10)#we have only 2 comp
 gaussianMixture.fit(data_train.reshape(-1, 1))#fitting
 
 data_test.reshape(-1, 1)
-test_proba = mix_gm.predict(data_test.reshape(-1, 1))
+test_proba = gaussianMixture.predict(data_test.reshape(-1, 1))
 test_proba[test_proba == 0].size, test_proba[test_proba == 1].size
 
 plt.hist(data_test[test_proba == 1],bins=64, histtype='step', density=True, color='green');

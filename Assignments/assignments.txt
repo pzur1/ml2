@@ -11,3 +11,7 @@ C and D not done. wrong priors in B
 Cinderella
 
 Notebook gives an error
+
+Poprawione. Ale nie jest oszacowana liczba klastrów 
+
+3 punkty
